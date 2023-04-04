@@ -1,0 +1,1702 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+    <style>
+    .TimesheetTableStyle {
+        font-family: arial, sans-serif;
+        border-collapse: collapse;
+        width: 100%;
+    }
+
+    tr:nth-child(even).TimesheetRowStyle {
+        background-color: #dddddd;
+    }
+
+    th.TimesheetHeaderStyle, td.TimesheetDataStyle {
+        border: 1px solid #dddddd;
+        text-align: center;
+        padding: 8px;
+    }
+
+    </style>
+
+    <meta charset="utf-8" />
+    <title>Timesheet Maker</title>
+    <script>
+    const jobListName = "JobList";
+
+    const userSelection = "UserSelection";
+
+    var refreshJobNumberList = true;
+
+    var notCustomerSpecificIndex;
+
+    var tableEntryIncomplete = false;
+
+    function TableEntry(tableEntryTime, tableCategory, tableChargeable, tableJobNumber, tableJobName, tableCustomerName,
+        tableHoursSpent, tableDaysSpent, tableComment, entryComplete, includeInExport, excludeFromStorage)
+    {
+        this.TableEntryTime = tableEntryTime;
+        this.TableCategory = tableCategory;
+        this.TableChargeable = tableChargeable;
+        this.TableJobNumber = tableJobNumber;
+        this.TableJobName = tableJobName;
+        this.TableCustomerName = tableCustomerName;
+        this.TableHoursSpent = tableHoursSpent;
+        this.TableDaysSpent = tableDaysSpent;
+        this.TableComment = tableComment;
+        this.EntryComplete = entryComplete;
+        this.IncludeInExport = includeInExport;
+        this.ExcludeFromStorage = excludeFromStorage;
+    };
+
+    function AddJob()
+    {
+        var jobNumber = document.getElementById("SetupJobNumber").value;
+        jobNumber = jobNumber.trim();
+        var jobName = document.getElementById("SetupJobName").value;
+        jobName = jobName.trim();
+        var client = document.getElementById("SetupCustomerList").value;
+
+        var jobListJSON = localStorage.getItem(jobListName);
+        var jobList;
+        if (jobListJSON != null)
+        {
+            jobList = JSON.parse(jobListJSON);
+
+            var j;
+
+            for (j = 0; j < jobList.length; j++)
+            {
+                if (jobList[j].JobNumber == jobNumber)
+                {
+                    break;
+                }
+            }
+
+            if (j < jobList.length)
+            {
+                window.alert("Job number already exists");
+                return;
+            }
+        }
+
+        var obj =
+        {
+            JobNumber:jobNumber,
+            JobName:jobName,
+            Client:client
+        };
+
+        if (jobList == undefined)
+        {
+            jobList = [obj];
+        }
+        else
+        {
+            jobList[jobList.length] = obj;
+        }
+
+        localStorage.setItem(jobListName, JSON.stringify(jobList));
+
+        document.getElementById("SetupJobNumber").value = "";
+        document.getElementById("SetupJobName").value = "";
+        document.getElementById("SetupCustomerList").selectedIndex = 0;
+
+        //PopulateJobList();
+
+        refreshJobNumberList = true;
+
+        document.getElementById("SetupAddJob").disabled = true;
+    }
+
+    function PopulateJobList()
+    {
+        if (refreshJobNumberList)
+        {
+            var selectElement = document.getElementById("SubmitJobNumber");
+            var k;
+
+            if (selectElement != null)
+            {
+                for (k = (selectElement.length - 1); k >= 0; k--)
+                {
+                    selectElement.remove(k);
+                }
+            }
+
+            var defaultItem = document.createElement("option");
+            defaultItem.text = "Job Number..";
+            selectElement.add(defaultItem);
+
+            var jobListJSON = localStorage.getItem(jobListName);
+            var jobList;
+            if (jobListJSON != null)
+            {
+                jobList = JSON.parse(jobListJSON);
+
+                //jobList.sort(function(a,b){return a.JobNumber.toUpperCase() - b.JobNumber.toUpperCase()});
+                jobList.sort(function(a,b){
+                return CompareStrings(a.JobNumber, b.JobNumber)
+                });
+
+                for (k = 0; k < jobList.length; k++)
+                {
+                    var newItem = document.createElement("option");
+                    newItem.text = jobList[k].JobNumber;
+                    selectElement.add(newItem);
+                }
+            }
+
+        refreshJobNumberList = false;
+        }
+    }
+
+    function CompareStrings(a, b)
+        {
+            a = a.toUpperCase();
+            b = b.toUpperCase();
+
+            if (a != b)
+            {
+                var limit = Math.min(a.length, b.length);
+
+                for (var index = 0; index < limit; index++)
+                {
+                    var result = a.charCodeAt(index) - b.charCodeAt(index);
+
+                    if (result != 0)
+                    {
+                        return AdjustToBound(result);
+                    }
+                }
+
+                return AdjustToBound(a.length - b.length);
+            }
+            else
+            {
+                return 0;
+            }
+        }
+
+    function AdjustToBound(input)
+        {
+            return (input > 0) ? 1 : -1;
+        }
+
+    function InitializePage()
+    {
+        if (typeof(Storage) == "undefined")
+        {
+            window.alert("Sorry, this browser is not compatible");
+            document.getElementById("StoreJobInfo").disabled = true;
+            document.getElementById("AddTask").disabled = true;
+        }
+        else
+        {
+            BuildCustomerList("SetupCustomerList");
+
+            BuildUserList();
+
+            var selectedIndex = localStorage.getItem(userSelection);
+
+            if (selectedIndex == null)
+            {
+                selectedIndex = 0;
+                localStorage.setItem(userSelection, selectedIndex.toString());
+            }
+
+            document.getElementById("UserList").selectedIndex = selectedIndex;
+
+            //document.getElementById("TimeSheetElements").hidden = (selectedIndex == 0);
+
+            SetTimeSheetState();
+
+            SetExportDateRangeText();
+        }
+    }
+
+    function SetExportDateRangeText()
+    {
+        var dateRange = GetPreviousWeekDateRange();
+
+        var startDate = dateRange[0].toDateString();
+
+        var startDateParts = startDate.split(" ");
+
+        var startDateDay = startDateParts[0];
+
+        var startDateMonth = startDateParts[1];
+
+        var startDateDayOfMonth = startDateParts[2];
+
+        var startDateYear = startDateParts[3];
+
+        var endDate = dateRange[1].toDateString();
+
+        var endDateParts = endDate.split(" ");
+
+        var endDateDay = endDateParts[0];
+
+        var endDateMonth = endDateParts[1];
+
+        var endDateDayOfMonth = endDateParts[2];
+
+        var endDateYear = endDateParts[3];
+
+        var dateRangeText;
+
+        if (startDateMonth == endDateMonth)
+        {
+            dateRangeText = startDateDay + " " + startDateDayOfMonth + " - " +
+            endDateDay + " " + endDateDayOfMonth + " " + endDateMonth + " " + endDateYear;
+        }
+        else
+        {
+            dateRangeText = startDateDay + " " + startDateDayOfMonth + " " + startDateMonth + " ";
+
+            if (startDateYear != endDateYear)
+            {
+                dateRangeText += startDateYear + " ";
+            }
+
+            dateRangeText += "- " + endDateDay + " " + endDateDayOfMonth + " " + endDateMonth +
+                " " + endDateYear;
+        }
+
+        var element = document.getElementById("ExportPreviousWeek");
+
+        var content = element.innerHTML;
+
+        content += " (" + dateRangeText + ")";
+
+        element.nextSibling.innerHTML += content;
+
+        element.checked = true;
+    }
+
+    function GetPreviousWeekDateRange()
+    {
+        var dateNow = new Date();
+
+        dateNow.setMilliseconds(0);
+        dateNow.setSeconds(0);
+        dateNow.setMinutes(0);
+        dateNow.setHours(0);
+
+        dateNow.setDate(dateNow.getDate() - dateNow.getDay());
+
+        var endDate = new Date(dateNow);
+
+        dateNow.setDate(dateNow.getDate() - 6);
+
+        var startDate = new Date(dateNow);
+
+        return [startDate, endDate];
+    }
+
+    function InitializeTimesheetTable()
+    {
+        PopulateJobList();
+
+        BuildCustomerList("SubmitCustomerList");
+
+        var date = new Date();
+
+        var obj = document.getElementById("SubmitTimesheetEntryDate");
+
+        var currentDateTime = new Date().toISOString();
+
+        var currentDate = currentDateTime.substr(0, currentDateTime.indexOf("T"));
+
+        obj.value = currentDate;
+
+        {
+            var element = document.getElementById("SubmitCategory");
+
+            if (element.length == 0)
+            {
+                var newItem = document.createElement("option");
+                newItem.text = "Select a category..";
+                element.add(newItem);
+
+                var items =["Change", "DM", "Projects", "BAU", "Migration", "Internal", "Admin", "Holiday",
+                    "Sickness", "Training", "Break"];
+
+                items.sort(function (a,b){return CompareStrings(a, b)});
+
+                for (var index = 0; index < items.length; index++)
+                {
+                    var newItem = document.createElement("option");
+                    newItem.text = items[index];
+
+                    switch(items[index])
+                    {
+                        case "Internal":
+                            newItem.value = "Internal ";
+                            break;
+                        case "BAU":
+                            newItem.value = "BAU  ";
+                            break;
+                        default:
+                            newItem.value = items[index];
+                    }
+
+                    element.add(newItem);
+                }
+            }
+        }
+
+        ResetSubmissionValues();
+
+        PopulateTimeSheetTable();
+    }
+
+    function ResetSubmissionValues()
+    {
+        document.getElementById("SubmitCategory").selectedIndex = 0;
+
+        document.getElementById("SubmitChargeable").value = "";
+
+        document.getElementById("SubmitJobNumberManual").value = "";
+
+        document.getElementById("SubmitJobName").value = "";
+
+        document.getElementById("SubmitComment").value = "";
+
+        //document.getElementById("SubmitTimeSpent").value = "";
+
+        document.getElementById("SubmitJobNumber").selectedIndex = 0;
+        document.getElementById("SubmitJobNumber").disabled = false;
+
+        document.getElementById("SubmitCustomerList").selectedIndex = 0;
+        document.getElementById("SubmitCustomerList").disabled = false;
+    }
+
+    function GetTimeSheetKey()
+    {
+        if (document.getElementById("UserList").selectedIndex == 0)
+        {
+            throw "Invalid user selection";
+        }
+        else
+        {
+            return "TimeSheet: " + document.getElementById("UserList").value;
+        }
+    }
+
+    function PopulateTimeSheetTable()
+    {
+        UpdateCalendarDependencies();
+
+        var disableCompleteEntry = true;
+
+        var table = document.getElementById("TimeSheetTable");
+
+        while (table.rows.length > 1)
+        {
+            table.deleteRow(-1);
+        }
+
+        if (document.getElementById("UserList").selectedIndex != 0)
+        {
+            var timeSheetKey = GetTimeSheetKey();
+
+            var timeSheetJSON = localStorage.getItem(timeSheetKey);
+
+            if (timeSheetJSON != null)
+            {
+                var timeSheet = JSON.parse(timeSheetJSON);
+
+                SetMaxMinDate(timeSheet);
+
+                var date = document.getElementById("SubmitTimesheetEntryDate").value;
+
+                var timeSheet = JSON.parse(timeSheetJSON);
+
+                var z;
+
+                for (z = 0; z < timeSheet.Content.length; z++)
+                {
+                    if (timeSheet.Content[z].TableDateTime == date)
+                    {
+                        for (var k = 0; k < timeSheet.Content[z].TableEntries.length; k++)
+                        {
+                            var row = table.insertRow(-1);
+
+                            row.setAttribute("class", "TimesheetRowStyle");
+
+                            var dateTimeCell = row.insertCell(0);
+                            dateTimeCell.setAttribute("class", "TimesheetDataStyle");
+
+                            var categoryCell = row.insertCell(1);
+                            categoryCell.setAttribute("class", "TimesheetDataStyle");
+
+                            var chargeableCell = row.insertCell(2);
+                            chargeableCell.setAttribute("class", "TimesheetDataStyle");
+
+                            var jobNumberCell = row.insertCell(3);
+                            jobNumberCell.setAttribute("class", "TimesheetDataStyle");
+
+                            var jobNameCell = row.insertCell(4);
+                            jobNameCell.setAttribute("class", "TimesheetDataStyle");
+
+                            var customerNameCell = row.insertCell(5);
+                            customerNameCell.setAttribute("class", "TimesheetDataStyle");
+
+                            var hoursSpentCell = row.insertCell(6);
+                            hoursSpentCell.setAttribute("class", "TimesheetDataStyle");
+
+                            var daysSpentCell = row.insertCell(7);
+                            daysSpentCell.setAttribute("class", "TimesheetDataStyle");
+
+                            var commentCell = row.insertCell(8);
+                            commentCell.setAttribute("class", "TimesheetDataStyle");
+                            commentCell.setAttribute("onclick", "EditComment(this)");
+
+                            dateTimeCell.innerHTML = timeSheet.Content[z].TableEntries[k].TableEntryTime;
+                            categoryCell.innerHTML = timeSheet.Content[z].TableEntries[k].TableCategory;
+                            chargeableCell.innerHTML = timeSheet.Content[z].TableEntries[k].TableChargeable;
+                            chargeableCell.style = "background-color:Tomato";
+                            jobNumberCell.innerHTML = timeSheet.Content[z].TableEntries[k].TableJobNumber;
+                            jobNameCell.innerHTML = timeSheet.Content[z].TableEntries[k].TableJobName;
+                            customerNameCell.innerHTML = timeSheet.Content[z].TableEntries[k].TableCustomerName;
+                            hoursSpentCell.innerHTML = timeSheet.Content[z].TableEntries[k].TableHoursSpent;
+                            daysSpentCell.innerHTML = timeSheet.Content[z].TableEntries[k].TableDaysSpent;
+                            daysSpentCell.style = "background-color:Tomato";
+                            commentCell.innerHTML = timeSheet.Content[z].TableEntries[k].TableComment;
+                            disableCompleteEntry = timeSheet.Content[z].TableEntries[k].EntryComplete;
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+        document.getElementById("CompleteEntry").disabled = disableCompleteEntry;
+    }
+
+    function EditComment(commentElement)
+    {
+        var blah = commentElement;
+    }
+
+    function StoreTimeSheet()
+    {
+
+    }
+
+    function BuildTimeString()
+    {
+        var parts = new Date().toTimeString().split(":", 2);
+        return parts[0] + ":" + parts[1];
+    }
+
+    function BuildTableEntry()
+    {
+        var tableEntryTime = BuildTimeString();
+        var tableCategory = document.getElementById("SubmitCategory").value;
+        var tableChargeable = document.getElementById("SubmitChargeable").value;;
+        var tableJobNumber = document.getElementById("SubmitJobNumberManual").value;
+        var tableJobName = document.getElementById("SubmitJobName").value;
+        var tableCustomerName = document.getElementById("SubmitCustomerList").value;
+        var tableHoursSpent = "(in progress)";
+        var tableDaysSpent = "";
+        var tableComment = document.getElementById("SubmitComment").value;
+
+        var tableEntry = new TableEntry(tableEntryTime,
+            tableCategory,
+            tableChargeable,
+            tableJobNumber,
+            tableJobName,
+            tableCustomerName,
+            tableHoursSpent,
+            tableDaysSpent,
+            tableComment,
+            false,
+            true,
+            false);
+
+        AdjustEntry(tableEntry);
+
+        return tableEntry;
+    }
+
+    function AdjustEntry(tableEntry)
+    {
+        if (tableEntry.TableCategory == "Break")
+        {
+            //tableEntry.TableHoursSpent = "N/A";
+           // tableEntry.EntryComplete = true;
+            tableEntry.IncludeInExport = false;
+        }
+    }
+
+    function AddTableEntryToStorage(tableEntry)
+    {
+        var timeSheetKey = GetTimeSheetKey();
+
+        var timeSheetJSON = localStorage.getItem(timeSheetKey);
+
+        var date = document.getElementById("SubmitTimesheetEntryDate").value;
+
+        if (timeSheetJSON == null)
+        {
+            var timeSheetEntries = [tableEntry];
+
+            var nowDateTime = new Date().toISOString();
+
+            var nowDate = nowDateTime.split("T")[0];
+
+            if (nowDate != date)
+            {
+                date = nowDate;
+            }
+
+            var userTimeSheetTable =
+            {
+                TableDateTime:date,
+                TableEntries:timeSheetEntries
+            }
+
+            var userTimeSheets =
+            {
+                Content:[userTimeSheetTable]
+            }
+
+            localStorage.setItem(timeSheetKey, JSON.stringify(userTimeSheets));
+        }
+        else
+        {
+            var timeSheet = JSON.parse(timeSheetJSON);
+
+            var z;
+
+            for (z = 0; z < timeSheet.Content.length; z++)
+            {
+                if (timeSheet.Content[z].TableDateTime == date)
+                {
+                    var lastEntry = timeSheet.Content[z].TableEntries.pop();
+                    var parts = lastEntry.TableEntryTime.split(":", 2);
+                    var hoursEntryTimeBefore = Number(parts[0]);
+                    var minutesEntryTimeBefore = Number(parts[1]);
+
+                    parts = tableEntry.TableEntryTime.split(":", 2);
+                    var hoursEntryTimeAfter = Number(parts[0]);
+                    var minutesEntryTimeAfter = Number(parts[1]);
+
+                    if (hoursEntryTimeAfter < hoursEntryTimeBefore)
+                    {
+                        hoursEntryTimeAfter += 24;
+                    }
+
+                    var timeSpent = hoursEntryTimeAfter * 60 + minutesEntryTimeAfter - hoursEntryTimeBefore * 60
+                        - minutesEntryTimeBefore;
+
+                    var timeSpentMinutes = timeSpent % 60;
+                    var timeSpentHours = (timeSpent - timeSpentMinutes) / 60;
+
+                    var timeSpentHoursText = "";
+                    if (timeSpentHours > 0)
+                    {
+                        timeSpentHoursText = timeSpentHours.toString() + "h";
+                    }
+
+                    var timeSpentMinutesText = "";
+                    if ((timeSpentMinutes > 0) || (timeSpentHoursText == ""))
+                    {
+                        timeSpentMinutesText = timeSpentMinutes.toString() + "m";
+                    }
+
+                    if (!lastEntry.EntryComplete)
+                    {
+                        lastEntry.TableHoursSpent = (timeSpentHoursText + " " + timeSpentMinutesText).trim();
+                        lastEntry.EntryComplete = true;
+                    }
+                    timeSheet.Content[z].TableEntries.push(lastEntry);
+
+                    if (!tableEntry.ExcludeFromStorage)
+                    {
+                        var nowDateTime = new Date().toISOString();
+
+                        var nowDate = nowDateTime.split("T")[0];
+
+                        if (nowDate != date)
+                        {
+                            //tableEntry.TableDateTime = nowDate;
+                            z = timeSheet.Content.length;
+                            date = nowDate;
+                        }
+                        else
+                        {
+                            timeSheet.Content[z].TableEntries.push(tableEntry);
+                        }
+                    }
+                    break;
+                }
+            }
+
+            if (z == timeSheet.Content.length)
+            {
+                var timeSheetEntries = [tableEntry];
+
+                var userTimeSheetTable =
+                {
+                    TableDateTime:date,
+                    TableEntries:timeSheetEntries
+                }
+
+                timeSheet.Content.push(userTimeSheetTable)
+            }
+
+            localStorage.setItem(timeSheetKey, JSON.stringify(timeSheet));
+        }
+    }
+
+    function SubmitToTimesheetHandler(tableEntry)
+    {
+        AddTableEntryToStorage(tableEntry);
+
+        PopulateTimeSheetTable();
+
+        ResetSubmissionValues();
+
+        //document.getElementById("User").disabled = true;
+        document.getElementById("SubmitToTimesheet").disabled = true;
+    }
+
+    function CompleteEntryHandler()
+    {
+        var finalizeEntry = new TableEntry(BuildTimeString(),
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            true,
+            false,
+            true);
+
+        AddTableEntryToStorage(finalizeEntry);
+
+        PopulateTimeSheetTable();
+    }
+
+    function SetSubmitState()
+    {
+        document.getElementById("SubmitToTimesheet").disabled =
+        (!
+        (
+        (document.getElementById("SubmitChargeable").value != "")
+        &&
+        (document.getElementById("SubmitJobNumberManual").value.trim() != "")
+        &&
+        (document.getElementById("SubmitJobName").value.trim() != "")
+        &&
+        (document.getElementById("SubmitCustomerList").selectedIndex != 0)
+        //&&
+        //((document.getElementById("SubmitTimeSpent").hidden == true) || (Number(document.getElementById("SubmitTimeSpent").value) > 0))
+        &&
+        (document.getElementById("UserList").selectedIndex != 0)
+        ));
+    }
+
+    function UpdateDependentElements()
+    {
+        var selectedIndex = document.getElementById("SubmitCategory").value;
+
+        //document.getElementById("AddToTimesheet").disable = (selectedIndex == 0);
+
+        var chargeableText;
+
+        switch(selectedIndex)
+        {
+            case "Change":
+            case "DM":
+            case "Projects":
+            case "BAU  ":
+                chargeableText = "Chargeable";
+                break;
+            case "Migration":
+            case "Internal ":
+            case "Admin":
+            case "Holiday":
+            case "Sickness":
+            case "Training":
+            case "Break":
+                chargeableText = "Non Chargeable";
+                break;
+
+            default:
+                chargeableText = "";
+        }
+
+        document.getElementById("SubmitChargeable").value = chargeableText;
+
+        switch(selectedIndex)
+        {
+            case "Admin":
+            case "Holiday":
+            case "Sickness":
+            case "Break":
+                document.getElementById("SubmitJobNumberManual").value = "N/A";
+                document.getElementById("SubmitJobNumberManual").disabled = true;
+                document.getElementById("SubmitJobName").value = "N/A";
+                document.getElementById("SubmitJobName").disabled = true;
+                document.getElementById("SubmitCustomerList").selectedIndex = notCustomerSpecificIndex;
+                document.getElementById("SubmitCustomerList").disabled = true;
+                document.getElementById("SubmitJobNumber").disabled = true;
+                document.getElementById("SubmitJobNumber").selectedIndex = 0;
+                break;
+           // case "Change":
+           //     break;
+            default:
+                document.getElementById("SubmitJobNumberManual").value = "";
+                document.getElementById("SubmitJobNumberManual").disabled = false;
+                document.getElementById("SubmitJobName").value = "";
+                document.getElementById("SubmitJobName").disabled = false;
+                document.getElementById("SubmitCustomerList").selectedIndex = 0;
+                document.getElementById("SubmitCustomerList").disabled = false;
+                document.getElementById("SubmitJobNumber").disabled = false;
+                document.getElementById("SubmitJobNumber").selectedIndex = 0;
+        }
+
+        SetSubmitState();
+    }
+
+    function BuildUserList()
+    {
+        var userArray = [
+            "Alex Woolven",
+            "Andrew Tiffany",
+            "Ben Charlwood",
+            "Bonita Barrow",
+            "Danielle Beattie",
+            "Darryl Prinn",
+            "Graeme Simpson",
+            "Holly Pownall",
+            "Ian Hodgson",
+            "Imran Khan",
+            "James Horan",
+            "John White",
+            "Jyothsna Annapuram",
+            "Karen Lockwood",
+            "Kieran Smith",
+            "Mark Hunter",
+            "Michael Lawlor",
+            "Miroslaw Kaczor",
+            "Mounika Pasala",
+            "Neil Smith",
+            "Nigel Sykes",
+            "Paul Geldard",
+            "Sam Nicholl",
+            "Satya Nandigam",
+            "Shamsher Choudhury",
+            "Thomas Addison",
+            "Tolga Altinors",
+            "Vijay Prathikantam",
+            "Will Newton",
+            "Kathleen Lopez",
+            "Julia Stelfox"
+        ]; 
+        userArray.sort(function(a,b){
+            return CompareStrings(a, b)
+        });
+
+        var userList = document.getElementById("UserList");
+
+        var k;
+
+        for (k = (userList.length - 1); k >= 0; k--)
+        {
+            userList.remove(index);
+        }
+
+        var newItem = document.createElement("option");
+        newItem.value = "(none)";
+        newItem.text = "Select a user..";
+        userList.add(newItem);
+
+        for (k = 0; k < userArray.length; k++)
+        {
+            newItem = document.createElement("option");
+            newItem.value = userArray[k];
+            newItem.text = userArray[k];
+            userList.add(newItem);
+        }
+    }
+
+    function BuildCustomerList(listId)
+    {
+        var selectElement = document.getElementById(listId);
+
+        if (selectElement.length > 0)
+        {
+            return;
+        }
+
+        var customerArray = [//["(none)","Select a customer.."],
+        ["JBW Judicial Services Group","JBW Judicial Services Group"],
+        ["3663","3663"],
+        ["JD Williams","JD Williams"],
+        ["Aberdeen CC Pension Fund","Aberdeen CC Pension Fund"],
+        ["AAH -GeGe","AAH -GeGe"],
+        ["JFK Associates (UK) Ltd","JFK Associates (UK) Ltd"],
+        ["Aboutmore","Aboutmore"],
+        ["Aberdeen City Council","Aberdeen City Council"],
+        ["Aberdeenshire Council","Aberdeenshire Council"],
+        ["Jordan Media","Jordan Media"],
+        ["Adare International","Adare International"],
+        ["Abstrakt Services Ltd","Abstrakt Services Ltd"],
+        ["Accounting Adj/Sundry Sales","Accounting Adj/Sundry Sales"],
+        ["Ad Hoc Print","Ad Hoc Print"],
+        ["KCOM Group","KCOM Group"],
+        ["Adviser Plus","Adviser Plus"],
+        ["Adare SEC","Adare SEC"],
+        ["ADT Fire & Integrated Security","ADT Fire & Integrated Security"],
+        ["Advance Housing & Support Ltd","Advance Housing & Support Ltd"],
+        ["Advantis Credit Limited","Advantis Credit Limited"],
+        ["Kingston Upon Hull City Council","Kingston Upon Hull City Council"],
+        ["American Solutions For Business","American Solutions For Business"],
+        ["AGC&S","AGC&S"],
+        ["Agenda Management Services Ltd","Agenda Management Services Ltd"],
+        ["Agilisys Holdings Limited","Agilisys Holdings Limited"],
+        ["Allerdale Borough Council","Allerdale Borough Council"],
+        ["Allianz","Allianz"],
+        ["Lakeland","Lakeland"],
+        ["Ardent Credit Services Ltd","Ardent Credit Services Ltd"],
+        ["Andrew Page 1917 Limited","Andrew Page 1917 Limited"],
+        ["Animal Trust Limited","Animal Trust Limited"],
+        ["Aon","Aon"],
+        ["APS","APS"],
+        ["APS","RPA -> APS"],
+        ["AQA","AQA"],
+        ["Arc (Europe) Ltd","Arc (Europe) Ltd"],
+        ["LGSS Pensions","LGSS Pensions"],
+        ["ATOS IT Services UK Ltd","ATOS IT Services UK Ltd"],
+        ["Argos Ltd","Argos Ltd"],
+        ["Argos Ltd","HRG -> Argos Ltd"],
+        ["Aromaworks","Aromaworks"],
+        ["Arriva Trains","Arriva Trains"],
+        ["Arvato Financial Solutions","Arvato Financial Solutions"],
+        ["ASD Metal Services","ASD Metal Services"],
+        ["Associated News","Associated News"],
+        ["Astus UK Ltd","Astus UK Ltd"],
+        ["Membership (New)","Membership (New)"],
+        ["Black & Callow","Black & Callow"],
+        ["ATS Ltd","ATS Ltd"],
+        ["Banner ( Barclays )","Banner ( Barclays )"],
+        ["Barclays PLC","Barclays PLC"],
+        ["Barnsley Metropolitan Council","Barnsley Metropolitan Council"],
+        ["Bauer","Bauer"],
+        ["Bedford Insurance Group","Bedford Insurance Group"],
+        ["Bedfordshire Pension Fund","Bedfordshire Pension Fund"],
+        ["BH Live","BH Live"],
+        ["Misc Cheques","Misc Cheques"],
+        ["Bradford MDC","Bradford MDC"],
+        ["Bluestone Credit Management Ltd","Bluestone Credit Management Ltd"],
+        ["BMJ Publishing Group Ltd","BMJ Publishing Group Ltd"],
+        ["BNP Paribas Leasing Solutions Ltd","BNP Paribas Leasing Solutions Ltd"],
+        ["BOC Limited","BOC Limited"],
+        ["Bolton NHS Trust/IFM Bolton","Bolton NHS Trust/IFM Bolton"],
+        ["BONMARCHE LTD","BONMARCHE LTD"],
+        ["Boots","Boots"],
+        ["Box-it Document Solutions Ltd","Box-it Document Solutions Ltd"],
+        ["BP Pensions Ltd","BP Pensions Ltd"],
+        ["Moriaty Law","Moriaty Law"],
+        ["Calderdale Council","Calderdale Council"],
+        ["Brightsource","Brightsource"],
+        ["British Red Cross","British Red Cross"],
+        ["British Science Association","British Science Association"],
+        ["BSD","BSD"],
+        ["BT Accounts Payable","BT Accounts Payable"],
+        ["Buckinghamshire CC Pension Fund","Buckinghamshire CC Pension Fund"],
+        ["Bunzl Cleaning & Hygiene Supplies","Bunzl Cleaning & Hygiene Supplies"],
+        ["Business Systems","Business Systems"],
+        ["BW Legal Ltd","BW Legal Ltd"],
+        ["Cabot Financial Ltd","Cabot Financial Ltd"],
+        ["NCFE","NCFE"],
+        ["CDP Print Management Ltd","CDP Print Management Ltd"],
+        ["CCS Collect","CCS Collect"],
+        ["Calor Gas Ltd","Calor Gas Ltd"],
+        ["Cambridge Building Society","Cambridge Building Society"],
+        ["Canon","Canon"],
+        ["Capita","Capita"],
+        ["Capita Customer Management Ltd","Capita Customer Management Ltd"],
+        ["Capital Resolve","Capital Resolve"],
+        ["Capquest/Arrow Debt Recovery Ltd","Capquest/Arrow Debt Recovery Ltd"],
+        ["Cardiff & Vale of Glamorgan Pension Fund","Cardiff & Vale of Glamorgan Pension Fund"],
+        ["Care UK","Care UK"],
+        ["Caribbean","Caribbean"],
+        ["Carnival UK","Carnival UK"],
+        ["Newsquest","Newsquest"],
+        ["Clackmannanshire Council","Clackmannanshire Council"],
+        ["Chubb","Chubb"],
+        ["Certificates","Certificates"],
+        ["Ceredigion Council","Ceredigion Council"],
+        ["Certificates & Tenders","Certificates & Tenders"],
+        ["Ceva Logistics","Ceva Logistics"],
+        ["Charterhouse","Charterhouse"],
+        ["Cheques","Cheques"],
+        ["Cheshire Pension Fund","Cheshire Pension Fund"],
+        ["Cheshire West & Chester","Cheshire West & Chester"],
+        ["CISI","CISI"],
+        ["Citipost Mail Ltd","Citipost Mail Ltd"],
+        ["City & County of Swansea Pension Fund","City & County of Swansea Pension Fund"],
+        ["City of Bradford MDC (WYPF)","City of Bradford MDC (WYPF)"],
+        ["City of Edinburgh Council","City of Edinburgh Council"],
+        ["Ocean Housing","Ocean Housing"],
+        ["Debenhams","Debenhams"],
+        ["Communisis","Communisis"],
+        ["Computastore","Computastore"],
+        ["Clwyd Pension Fund","Clwyd Pension Fund"],
+        ["Control Account","Control Account"],
+        ["Co-op","Co-op"],
+        ["Copeland Borough Council","Copeland Borough Council"],
+        ["Cosmos","Cosmos"],
+        ["Cosmos","Cosmos"],
+        ["Creation Marketing Services Ltd","Creation Marketing Services Ltd"],
+        ["Cross Country Trains","Cross Country Trains"],
+        ["Crown Commercial Service","Crown Commercial Service"],
+        ["Cumberland Building Society","Cumberland Building Society"],
+        ["Customer Rebates","Customer Rebates"],
+        ["Danwood - Passthrough (£nil margin)","Danwood - Passthrough (£nil margin)"],
+        ["Darlington Borough Council","Darlington Borough Council"],
+        ["Park","Park"],
+        ["E&N Herts. NHS (Danwood) 2","E&N Herts. NHS (Danwood) 2"],
+        ["Delphi","Delphi"],
+        ["Derby City Council","Derby City Council"],
+        ["Dee Valley Water","Dee Valley Water"],
+        ["Derby Homes","Derby Homes"],
+        ["Direct Line Group Acs Payable","Direct Line Group Acs Payable"],
+        ["Domestic and General Group Ltd","Domestic and General Group Ltd"],
+        ["Doncaster MBC","Doncaster MBC"],
+        ["Dorset County Pension Fund","Dorset County Pension Fund"],
+        ["Dreams","Dreams"],
+        ["DTC Saudi Arabia","DTC Saudi Arabia"],
+        ["Dumfries & Galloway Council Pension Fund","Dumfries & Galloway Council Pension Fund"],
+        ["Dun & Bradstreet","Dun & Bradstreet"],
+        ["Dundee City Council","Dundee City Council"],
+        ["Dundee City Council Pension Fund","Dundee City Council Pension Fund"],
+        ["Durham County Council","Durham County Council"],
+        ["Dyfed Pension Fund","Dyfed Pension Fund"],
+        ["PPG AC UK Ltd","PPG AC UK Ltd"],
+        ["Financial Service Compensation Scheme","Financial Service Compensation Scheme"],
+        ["East Renfrewshire Council","East Renfrewshire Council"],
+        ["East Riding of Yorkshire Council","East Riding of Yorkshire Council"],
+        ["East Lothian Council","East Lothian Council"],
+        ["ENGIE Services Ltd","ENGIE Services Ltd"],
+        ["Essex County Council Pension Fund","Essex County Council Pension Fund"],
+        ["Esso","Esso"],
+        ["esure","esure"],
+        ["Euler Hermes UK Plc","Euler Hermes UK Plc"],
+        ["Evening Standard","Evening Standard"],
+        ["EVMS - Visitornet","EVMS - Visitornet"],
+        ["Experian Ltd","Experian Ltd"],
+        ["Express Gifts Limited","Express Gifts Limited"],
+        ["Fabrik Design & Communications","Fabrik Design & Communications"],
+        ["Falkirk Council","Falkirk Council"],
+        ["Family Mosaic","Family Mosaic"],
+        ["Fife Council","Fife Council"],
+        ["Fife Council Pension Fund","Fife Council Pension Fund"],
+        ["Renfrewshire VJB","Renfrewshire VJB"],
+        ["Green Flag","Green Flag"],
+        ["Forth Communication Services","Forth Communication Services"],
+        ["Foxtons","Foxtons"],
+        ["FIS Managed Services","FIS Managed Services"],
+        ["Game Retail","Game Retail"],
+        ["Gateshead Council","Gateshead Council"],
+        ["General Print","General Print"],
+        ["Geopost UK","Geopost UK"],
+        ["Graft","Graft"],
+        ["Grampian Valuation Joint Board","Grampian Valuation Joint Board"],
+        ["Grape Vine","Grape Vine"],
+        ["Rotherham Metropolitan Borough Council","Rotherham Metropolitan Borough Council"],
+        ["Hartlepool Council","Hartlepool Council"],
+        ["Greenham Trading Ltd","Greenham Trading Ltd"],
+        ["Guildford FY16 Actual Data","Guildford FY16 Actual Data"],
+        ["GWR","GWR"],
+        ["Gwynedd Council","Gwynedd Council"],
+        ["Hachette Filipacchi","Hachette Filipacchi"],
+        ["Harrogate Borough Council","Harrogate Borough Council"],
+        ["Hargreaves Lansdown","Hargreaves Lansdown"],
+        ["Hague Cheques","Hague Cheques"],
+        ["S D Taylor","S D Taylor"],
+        ["IFDS","IFDS"],
+        ["Hoist","Hoist"],
+        ["Havas Media","Havas Media"],
+        ["Henry Stones","Henry Stones"],
+        ["Hastings Direct","Hastings Direct"],
+        ["HH Associates Ltd - Lloyds","HH Associates Ltd - Lloyds"],
+        ["High Peak Borough Council","High Peak Borough Council"],
+        ["Hillview Garden Centre","Hillview Garden Centre"],
+        ["Hitachi Capital (UK) Plc","Hitachi Capital (UK) Plc"],
+        ["HomeServe Membership Ltd","HomeServe Membership Ltd"],
+        ["HP Enterprises","HP Enterprises"],
+        ["HTA","HTA"],
+        ["HTTprint Instance","HTTprint Instance"],
+        ["Security Print","Security Print"],
+        ["Independent","Independent"],
+        ["Imprima","Imprima"],
+        ["Shoosmiths LLP","Shoosmiths LLP"],
+        ["John Lewis","John Lewis"],
+        ["IPSOS Mori","IPSOS Mori"],
+        ["Iron Mountain","Iron Mountain"],
+        ["Inverclyde District Council","Inverclyde District Council"],
+        ["Insurance Collections Bureau","Insurance Collections Bureau"],
+        ["Smart Capture","Smart Capture"],
+        ["Loomis UK Ltd","Loomis UK Ltd"],
+        ["Kaizen Consultants (UK) Ltd","Kaizen Consultants (UK) Ltd"],
+        ["Kaizen Consultants (UK) Ltd","Kaizen Consultants (UK) Ltd"],
+        ["Lego Systems A/S","Lego Systems A/S"],
+        ["Leeds Building Society","Leeds Building Society"],
+        ["Language Line Ltd","Language Line Ltd"],
+        ["LIFETIME LEGAL LTD","LIFETIME LEGAL LTD"],
+        ["Live Nation","Live Nation"],
+        ["Kent County Council Pension","Kent County Council Pension"],
+        ["Kier Business Services Ltd","Kier Business Services Ltd"],
+        ["KNEC","KNEC"],
+        ["Kurz TMD","Kurz TMD"],
+        ["SQA","SQA"],
+        ["Milton Keynes Council","Milton Keynes Council"],
+        ["Lowell","Lowell"],
+        ["Merrills","Merrills"],
+        ["Middlesbrough BC","Middlesbrough BC"],
+        ["Midlothian Council","Midlothian Council"],
+        ["Staffordshire Pension Fund","Staffordshire Pension Fund"],
+        ["NECTA","NECTA"],
+        ["Mizuho Cheques","Mizuho Cheques"],
+        ["Monarch","Monarch"],
+        ["Mondial Assistance (UK) Ltd","Mondial Assistance (UK) Ltd"],
+        ["Monro","Monro"],
+        ["Morrisons","Morrisons"],
+        ["Mortimer Clarke Limited","Mortimer Clarke Limited"],
+        ["National Union Of Journalists","National Union Of Journalists"],
+        ["Motormile Finance Ltd","Motormile Finance Ltd"],
+        ["National Theatre","National Theatre"],
+        ["Stoke on Trent Council","Stoke on Trent Council"],
+        ["Newcastle City Council","Newcastle City Council"],
+        ["NEPO/NYCC Rebate","NEPO/NYCC Rebate"],
+        ["Network Rail","Network Rail"],
+        ["New Client Vouchers","New Client Vouchers"],
+        ["New Look","New Look"],
+        ["Tameside Borough Council","Tameside Borough Council"],
+        ["Other","Other"],
+        ["Non Specific Costs","Non Specific Costs"],
+        ["Norfolk Pension Fund","Norfolk Pension Fund"],
+        ["North Ayrshire Council","North Ayrshire Council"],
+        ["Other Security Print","Other Security Print"],
+        ["NFU Mutual","NFU Mutual"],
+        ["North Tyneside Council","North Tyneside Council"],
+        ["North Yorkshire Council","North Yorkshire Council"],
+        ["Orkney Valuation Joint Board","Orkney Valuation Joint Board"],
+        ["Northumberland County Council","Northumberland County Council"],
+        ["Opos Limited","Opos Limited"],
+        ["The Brighton Dome Ltd","The Brighton Dome Ltd"],
+        ["Paratus Ltd","Paratus Ltd"],
+        ["Outbox Enterprises UK","Outbox Enterprises UK"],
+        ["Oxfordshire County Council Pension Fund","Oxfordshire County Council Pension Fund"],
+        ["Pace Communications","Pace Communications"],
+        ["The Football Association Ltd","The Football Association Ltd"],
+        ["PSL","PSL"],
+        ["Principality","Principality"],
+        ["PAS","PAS"],
+        ["Pastdue Credit Solutions Ltd","Pastdue Credit Solutions Ltd"],
+        ["Pearson","Pearson"],
+        ["Prudential","Prudential"],
+        ["Production Hub","Production Hub"],
+        ["Park Retail Ltd","Park Retail Ltd"],
+        ["Phillips & Cohen Associates Ltd","Phillips & Cohen Associates Ltd"],
+        ["Phoenix Commercial Collections","Phoenix Commercial Collections"],
+        ["Polestar Group Man Svs","Polestar Group Man Svs"],
+        ["Powys County Council","Powys County Council"],
+        ["Time Inc (UK)","Time Inc (UK)"],
+        ["Redcar & Cleveland BC","Redcar & Cleveland BC"],
+        ["QQI","QQI"],
+        ["RBI","RBI"],
+        ["Reach","Reach"],
+        ["Rebates","Rebates"],
+        ["Toys R Us","Toys R Us"],
+        ["Saga Services Limited","Saga Services Limited"],
+        ["Response Repro","Response Repro"],
+        ["Restons Solicitors Limited","Restons Solicitors Limited"],
+        ["Rhondda Cynon Taf Council","Rhondda Cynon Taf Council"],
+        ["Ryedale District Council","Ryedale District Council"],
+        ["RNLI","RNLI"],
+        ["Roll Royce","Roll Royce"],
+        ["RR Donnelly Financial","RR Donnelly Financial"],
+        ["RSPB","RSPB"],
+        ["Ruthbridge Limited","Ruthbridge Limited"],
+        ["Uganda Insurers Association","Uganda Insurers Association"],
+        ["Scottish Borders Council","Scottish Borders Council"],
+        ["Santander UK PLC","Santander UK PLC"],
+        ["Scarborough Borough Council","Scarborough Borough Council"],
+        ["UNEB","UNEB"],
+        ["Secured Express Limited","Secured Express Limited"],
+        ["Scotts & Co","Scotts & Co"],
+        ["Universal Music","Universal Music"],
+        ["Standard Charter Cheques","Standard Charter Cheques"],
+        ["South Yorkshire Pensions Fund","South Yorkshire Pensions Fund"],
+        ["Shropshire Pension Fund","Shropshire Pension Fund"],
+        ["Skipton Building Society","Skipton Building Society"],
+        ["South Tyneside Council","South Tyneside Council"],
+        ["Solutions Labs Limited","Solutions Labs Limited"],
+        ["SSE Airtricity Ltd","SSE Airtricity Ltd"],
+        ["Sheffield City Council","Sheffield City Council"],
+        ["Staffordshire Moorlands District Council","Staffordshire Moorlands District Council"],
+        ["Sothebys","Sothebys"],
+        ["Speedy Hire","Speedy Hire"],
+        ["VisitorNet","VisitorNet"],
+        ["Sterling Financial Pirnt Ltd","Sterling Financial Pirnt Ltd"],
+        ["Staples Uk Ltd","Staples Uk Ltd"],
+        ["Standard Life","Standard Life"],
+        ["Volkswagen Financial Services (UK) Ltd","Volkswagen Financial Services (UK) Ltd"],
+        ["THE FA GROUP","THE FA GROUP"],
+        ["Sunline Direct Mail","Sunline Direct Mail"],
+        ["Talk Talk Business","Talk Talk Business"],
+        ["Telcoinabox Ltd","Telcoinabox Ltd"],
+        ["Tandridge Council","Tandridge Council"],
+        ["Tesco","Tesco"],
+        ["TEA","TEA"],
+        ["Stockton Borough Council","Stockton Borough Council"],
+        ["Tanzania Revenue Authority","Tanzania Revenue Authority"],
+        ["Welsh Government","Welsh Government"],
+        ["The Way Ahead Group","The Way Ahead Group"],
+        ["The NCC","The NCC"],
+        ["The Practice Group","The Practice Group"],
+        ["West Lothian Council","West Lothian Council"],
+        ["TWG Services","TWG Services"],
+        ["Travelsphere","Travelsphere"],
+        ["TSL Education","TSL Education"],
+        ["Ticketmaster","Ticketmaster"],
+        ["Tickets","Tickets"],
+        ["TOOLSTATION LTD","TOOLSTATION LTD"],
+        ["Ticket & Labelling Solutions GmbH (Germany)","Ticket & Labelling Solutions GmbH (Germany)"],
+        ["Torfaen County Borough Council","Torfaen County Borough Council"],
+        ["Williams Lea Limited","Williams Lea Limited"],
+        ["UK Mail Ltd (Parcels Division)","UK Mail Ltd (Parcels Division)"],
+        ["Tyne & Wear Pension Fund","Tyne & Wear Pension Fund"],
+        ["Worldscale","Worldscale"],
+        ["VMS","VMS"],
+        ["Universities Superannuation Scheme","Universities Superannuation Scheme"],
+        ["University of Glamorgan","University of Glamorgan"],
+        ["Virgin Eastcoast","Virgin Eastcoast"],
+        ["Unison","Unison"],
+        ["Virgin Trains","Virgin Trains"],
+        ["Virtual Mailroom","Virtual Mailroom"],
+        ["Xerox NHS","Xerox NHS"],
+        ["W H Smith Retail Ltd","W H Smith Retail Ltd"],
+        ["Volta Impex","Volta Impex"],
+        ["Yell Limited","Yell Limited"],
+        ["Wandsworth Council","Wandsworth Council"],
+        ["Warwickshire County Council Pension Fund","Warwickshire County Council Pension Fund"],
+        ["Wescot Credit Services Ltd","Wescot Credit Services Ltd"],
+        ["West Midlands Pension Fund","West Midlands Pension Fund"],
+        ["Wheatons Exeter","Wheatons Exeter"],
+        ["Wigan Council","Wigan Council"],
+        ["Worcestershire County Council Pension","Worcestershire County Council Pension"],
+        ["Wrexham County Borough Council","Wrexham County Borough Council"],
+        ["Xafinity Consulting Ltd","Xafinity Consulting Ltd"],
+        ["Xerox (UK) Limited","Xerox (UK) Limited"]];
+
+        customerArray.sort(function(a,b){
+            return CompareStrings(a[1], b[1])
+        });
+
+        customerArray.unshift(["(none)", "Select a customer.."]);
+
+        var maxLength = 0;
+
+        for (var k = 0; k < customerArray.length; k++)
+        {
+            var newItem = document.createElement("option");
+            newItem.value = customerArray[k][0];
+            newItem.text = customerArray[k][1];
+            selectElement.add(newItem);
+            maxLength = Math.max(maxLength, newItem.text.length);
+        }
+
+        var separator = "-";
+
+        var separatorIndex = selectElement.length;
+
+        var extraArray = [
+            ["",""],
+            ["Customer not listed","Customer not listed"],
+            ["Not Customer Specific","Not Customer Specific"]
+        ];
+
+        for (var k = 0; k < extraArray.length; k++)
+        {
+            var newItem = document.createElement("option");
+            newItem.value = extraArray[k][0];
+            newItem.text = extraArray[k][1];
+            selectElement.add(newItem);
+            maxLength = Math.max(maxLength, newItem.text.length);
+        }
+
+        var adjustedSeparator = "";
+
+        while (adjustedSeparator.length < maxLength)
+        {
+            adjustedSeparator += separator;
+        }
+
+        //separator.repeat(maxLength);
+
+        selectElement[separatorIndex].text = adjustedSeparator;
+        selectElement[separatorIndex].disabled = true;
+
+        notCustomerSpecificIndex = selectElement.length - 1;
+    }
+
+    function RefreshSubmitElements()
+    {
+        var selectedValue = document.getElementById("SubmitJobNumber").value;
+        var selectedIndex = document.getElementById("SubmitJobNumber").selectedIndex;
+
+        if (selectedIndex != 0)
+        {
+            document.getElementById("SubmitJobNumberManual").value = selectedValue;
+
+            var jobListJSON = localStorage.getItem(jobListName);
+
+            var jobList;
+
+            if (jobListJSON != null)
+            {
+                jobList = JSON.parse(jobListJSON);
+
+                var j;
+
+                for (j = 0; j < jobList.length; j++)
+                {
+                    if (jobList[j].JobNumber == selectedValue)
+                    {
+                        break;
+                    }
+                }
+
+                if (j == jobList.length)
+                {
+                    window.alert("Fatal error retrieving job details");
+                    return;
+                }
+
+                document.getElementById("SubmitJobName").value = jobList[j].JobName;
+
+                var listLimit = document.getElementById("SubmitCustomerList").length;
+
+                var z;
+
+                for (z = 0; z < listLimit; z++)
+                {
+                    if (document.getElementById("SubmitCustomerList")[z].value == jobList[j].Client)
+                    {
+                        document.getElementById("SubmitCustomerList").selectedIndex = z;
+                        break;
+                    }
+                }
+
+                if (z == listLimit)
+                {
+                    window.alert("Fatal error retrieving job details");
+                    return;
+                }
+            }
+        }
+
+        SetSubmitState();
+    }
+
+    function SetMaxMinDate(timeSheet)
+    {
+        var dateTimeNow = new Date();
+
+        var dateMax = dateTimeNow.toISOString();
+
+        dateMax = dateMax.substr(0, dateMax.indexOf("T"));
+
+        document.getElementById("SubmitTimesheetEntryDate").setAttribute("max",
+            dateMax);
+
+        //dateTimeNow.setMonth(dateTimeNow.getMonth() - 1);
+        //var dateMin = dateTimeNow.toISOString();
+
+        var dateMin;
+
+        if (timeSheet != null)
+        {
+            dateMin = timeSheet.Content[0].TableDateTime;
+        }
+        else
+        {
+            dateMin = dateMax;
+        }
+
+        document.getElementById("SubmitTimesheetEntryDate").setAttribute("min",
+            dateMin);
+    }
+
+    function UpdateAddJobState()
+    {
+        var jobNumber = document.getElementById("SetupJobNumber").value;
+        jobNumber = jobNumber.trim();
+        var jobName = document.getElementById("SetupJobName").value;
+        jobName = jobName.trim();
+        var selectedIndex = document.getElementById("SetupCustomerList").selectedIndex;
+
+        document.getElementById("SetupAddJob").disabled = (!((jobNumber != "") && (jobName != "") && (selectedIndex != 0)));
+    }
+
+    function UpdateCalendarDependencies()
+    {
+        var selectedDate = document.getElementById("SubmitTimesheetEntryDate").value;
+
+        var nowDate = new Date().toISOString();
+
+        nowDate = nowDate.substr(0, nowDate.indexOf("T"));
+
+        var isToday = (selectedDate == nowDate);
+
+        //document.getElementById("HoursLabel").hidden = isToday;
+        //document.getElementById("SubmitTimeSpent").hidden = isToday;
+        document.getElementById("SubmitToTimesheet").hidden = !isToday;
+
+        document.getElementById("TimeSheetControls").hidden = !isToday;
+
+        //PopulateTimeSheetTable();
+    }
+
+    function SetTimeSheetState()
+    {
+        var selectedIndex = document.getElementById("UserList").selectedIndex;
+
+        localStorage.setItem(userSelection, selectedIndex.toString());
+
+        document.getElementById("TimeSheetElements").hidden = (selectedIndex == 0);
+
+        document.getElementById("SubmitTimesheetEntryDate").hidden = (selectedIndex == 0);
+
+        if (selectedIndex != 0)
+        {
+            InitializeTimesheetTable();
+        }
+    }
+
+    function ExtractTimeSpentPart(tableEntry, separator)
+    {
+        var timeSpent = 0;
+
+        //var regExp = new RegExp("\\d+" + separator + "\/i");
+
+        //var regExp = new RegExp("\\d+" + separator + '/i');
+
+        var pattern;
+
+        switch(separator)
+        {
+            case "H":
+            case "h":
+                pattern = /\d+(H|h)/i;
+                break;
+
+            case "M":
+            case "m":
+                pattern = /\d+(M|m)/i;
+                break;
+
+            default:
+                throw "Unsupported time unit";
+        }
+
+        var result = tableEntry.TableHoursSpent.match(pattern);
+
+        //var regExp = new RegExp("\\d+h/i");
+        //regExp.ignoreCase = true;
+
+        //var regExpResult = regExp.exec(tableEntry.TableHoursSpent);
+
+        if (result != null)
+        {
+            var numberPart = result[0].substr(0, result[0].length - 1);
+
+            timeSpent = Number(numberPart);
+        }
+
+        return timeSpent;
+    }
+
+    function ExportTimesheets()
+    {
+        var timeSheetKey = GetTimeSheetKey();
+
+        var timeSheetJSON = localStorage.getItem(timeSheetKey);
+
+        var applyDateRange = (document.getElementById("ExportPreviousWeek").checked == true);
+
+        if (timeSheetJSON != null)
+        {
+            var timeSheets = JSON.parse(timeSheetJSON);
+
+	        var finalOutput = [];
+
+            var dateRange = GetPreviousWeekDateRange();
+
+            for (var k = 0; k < timeSheets.Content.length; k++)
+                {
+                    var timeSheetTable = timeSheets.Content[k];
+
+                    var dateParts = timeSheetTable.TableDateTime.split("-");
+
+                    var timeSheetDate = dateParts[2] + "/" + dateParts[1] + "/" + dateParts[0];
+
+                    var testDate = new Date(Number(dateParts[0]), Number(dateParts[1]) - 1, Number(dateParts[2]), 0, 0, 0, 0);
+
+
+                    if (applyDateRange && ((testDate < dateRange[0]) || (testDate > dateRange[1])))
+                    {
+                        continue;
+                    }
+
+                    for (var t = 0; t < timeSheetTable.TableEntries.length; t++)
+                    {
+                        if (ExportTableEntry(timeSheetTable.TableEntries[t]))
+    		            {
+        		    	    var totalTimeSpent = ExtractTimeSpentPart(timeSheetTable.TableEntries[t], "H");
+
+                            totalTimeSpent *= 60;
+
+                            totalTimeSpent += ExtractTimeSpentPart(timeSheetTable.TableEntries[t], "M");
+
+        	                var totalComments = [];
+
+                            if (timeSheetTable.TableEntries[t].TableComment != "")
+                            {
+                                totalComments.push(timeSheetTable.TableEntries[t].TableComment);
+                            }
+
+                            var keyToMatch = BuildKey(timeSheetTable.TableEntries[t]);
+
+                            for (var i = t + 1; i < timeSheetTable.TableEntries.length; i++)
+                	        {
+                        	    if (ExportTableEntry(timeSheetTable.TableEntries[i]))
+                			    {
+                                    var keyToCompare = BuildKey(timeSheetTable.TableEntries[i]);
+
+                                	if (keyToMatch == keyToCompare)
+               	                	{
+                	            		var timeSpent = ExtractTimeSpentPart(timeSheetTable.TableEntries[i], "H");
+
+                                        timeSpent *= 60;
+
+                                        timeSpent += ExtractTimeSpentPart(timeSheetTable.TableEntries[i], "M");
+
+                   		            	totalTimeSpent += timeSpent;
+
+                                        if (timeSheetTable.TableEntries[i].TableComment != "")
+                                        {
+                                            var commentsIndex = 0;
+
+                                            for (; commentsIndex < totalComments.length; commentsIndex++)
+                                            {
+                                                if (totalComments[commentsIndex].search(timeSheetTable.TableEntries[i].TableComment) != -1)
+                                                {
+                                                    break;
+                                                }
+                                                else if (timeSheetTable.TableEntries[i].TableComment.search(totalComments[commentsIndex]) != -1)
+                                                {
+                                                    totalComments[commentsIndex] = timeSheetTable.TableEntries[i].TableComment;
+                                                    break;
+                                                }
+                                            }
+
+                                            if (commentsIndex == totalComments.length)
+                                            {
+                                                totalComments.push(timeSheetTable.TableEntries[i].TableComment);
+                                            }
+                        	        	}
+
+                			    		timeSheetTable.TableEntries[i] = null;
+                    				}
+                			    }
+        	                }
+
+        			var totalTimeSpentHours = totalTimeSpent  / 60;
+        			var totalTimeSpentHoursFloor = Math.floor(totalTimeSpentHours);
+        			var totalTimeSpentExtra = totalTimeSpentHours - totalTimeSpentHoursFloor;
+        			var totalTimeSpentFinal = 0;
+
+        			if (totalTimeSpentExtra < 0.25)
+        			{
+        				totalTimeSpentFinal  = 	totalTimeSpentHoursFloor;
+        			}
+        			else if (totalTimeSpentExtra < 0.5)
+        			{
+        		    		totalTimeSpentFinal  = 	totalTimeSpentHoursFloor + 0.25;
+        			}
+               			else if (totalTimeSpentExtra < 0.75)
+        			{
+        				totalTimeSpentFinal  = 	totalTimeSpentHoursFloor + 0.5;
+        			}
+        			else //if (totalTimeSpentExtra < 1)
+        			{
+        				totalTimeSpentFinal  = 	totalTimeSpentHoursFloor + 0.75;
+        			}/*
+        			else
+        			{
+        				totalTimeSpentFinal   += 1;
+        			}*/
+
+                    if (totalTimeSpentFinal == 0)
+                    {
+                        continue;
+                    }
+
+//                    finalOutput.push(timeSheetDate + "," + timeSheetTable.TableEntries[t].TableCategory + ",,\"" +
+//        				timeSheetTable.TableEntries[t].TableJobNumber +  "\",\"" + timeSheetTable.TableEntries[t].TableJobName +
+//        				"\",\"" + timeSheetTable.TableEntries[t].TableCustomerName + "\"," + totalTimeSpentFinal.toString() + ",,\"" + totalComments.toString() + "\"");
+
+                    finalOutput.push(timeSheetDate + "," + timeSheetTable.TableEntries[t].TableCategory + ",,\"" +
+                        timeSheetTable.TableEntries[t].TableJobNumber.replace(/"/g, "\"\"") +  "\",\"" + timeSheetTable.TableEntries[t].TableJobName.replace(/"/g, "\"\"") +
+                        "\",\"" + timeSheetTable.TableEntries[t].TableCustomerName.replace(/"/g, "\"\"") + "\"," + totalTimeSpentFinal.toString() + ",,\"" +
+                        totalComments.toString().replace(/"/g, "\"\"") + "\"");
+
+        			var blah = 0;
+        		    }
+                }
+            }
+
+            var user = document.getElementById("UserList").value;
+
+            var content = "Name,Date,Category,Chargeable,Job/Project Number,Job Name,Customer name,Time Spent (Hrs),Time Spent (Days),Comments\n";
+
+    	    for (var z = 0; z < finalOutput.length; z++)
+    	    {
+    		    content += user + "," + finalOutput[z] + "\n";
+    	    }
+
+    	    document.getElementById("Exported").innerHTML = content;
+        }
+    }
+
+    function FindItem(item)
+    {
+	    return (item.toUpperCase() == this.toUpperCase());
+    }
+
+    function BuildKey(tableEntry)
+    {
+        return tableEntry.TableCategory + "-" + tableEntry.TableChargeable + "-" + tableEntry.TableJobNumber +
+            "-" + tableEntry.TableJobName + "-" + tableEntry.TableCustomerName;
+    }
+
+    function ExportTableEntry(tableEntry)
+    {
+        if (tableEntry == null)
+            return false;
+
+        if (!tableEntry.IncludeInExport)
+            return false;
+
+        if (!tableEntry.EntryComplete)
+            return false;
+
+        return true;
+    }
+
+    </script>
+</head>
+<body onload="InitializePage()" >
+    <h1>Timesheet Maker v1.0.3</h1>
+
+    <div>
+        <label style="padding-right: 13px">Job/Project Number</label>
+        <input id="SetupJobNumber" style="width: 118px" type="text" oninput="UpdateAddJobState()"/>
+    </div>
+
+    <div>
+        <label style="padding-right: 13px">Job Name</label>
+        <input id="SetupJobName" style="width: 182px" type="text" oninput="UpdateAddJobState()"/>
+    </div>
+
+    <div>
+        <select id="SetupCustomerList" onchange="UpdateAddJobState()"></select>
+    </div>
+        
+    <div>
+        <button id="SetupAddJob" onclick="AddJob()" disabled="true">Add job</button>
+    </div>        
+    <br />
+
+    <div>
+        <span>
+            <select id="UserList" onchange="SetTimeSheetState()"></select>
+        </span>
+        <span>
+            <input id="SubmitTimesheetEntryDate" type="date" onchange="PopulateTimeSheetTable()" />
+        </span>
+    </div>
+    <fieldset id="TimeSheetElements" style="border: none;padding:0px">
+        <br />
+        <fieldset id="TimeSheetControls" style="border: 1px solid #000000;margin-left: 0px">
+            <table>
+                <tr>
+                    <td></td>
+                    <td><small>Chargeable</small></td>
+                    <td><select id="SubmitJobNumber" onchange="RefreshSubmitElements()" onfocus="PopulateJobList()"></select></td>
+                    <td><small>Job name</small></td>
+                    <td></td>
+                    <td><small>Comment</small></td>
+                </tr>
+                <tr>
+                    <td><select id="SubmitCategory" name="Category" onchange="UpdateDependentElements()"></select></td>
+                    <td><input id="SubmitChargeable" type="text" style="background-color:lightgrey" disabled="true"></input></td>
+                    <td><input id="SubmitJobNumberManual" type="text" oninput="SetSubmitState()" style="min-width:200px"></input></td>
+                    <td><input id="SubmitJobName" type="text" oninput="SetSubmitState()" style="min-width:200px"></input></td>
+                    <td><select id=SubmitCustomerList onchange="SetSubmitState()"></select></td>
+                    <td><input id="SubmitComment" type="text" style="min-width:220px"></input></td>
+                </tr>
+            </table>
+
+        <div>
+            <span>
+                <button id="SubmitToTimesheet" onclick="SubmitToTimesheetHandler(BuildTableEntry())" disabled="true">Add to timesheet</button>
+            </span>
+            <span>
+                <button id="CompleteEntry" onclick="CompleteEntryHandler()">Complete entry</button>
+            </span>
+        </div>
+        </fieldset>
+        <br />
+
+        <div style="overflow-x:auto;">
+            <table id="TimeSheetTable" class="TimesheetTableStyle">
+                <tr class=TimesheetRowStyle>
+                    <th class=TimesheetHeaderStyle>Time</th>
+                    <th class=TimesheetHeaderStyle>Category</th>
+                    <th class=TimesheetHeaderStyle>Chargeable</th>
+                    <th class=TimesheetHeaderStyle>Job/Project Number</th>
+                    <th class=TimesheetHeaderStyle>Job Name</th>
+                    <th class=TimesheetHeaderStyle>Customer name</th>
+                    <th class=TimesheetHeaderStyle>Time Spent</th>
+                    <th class=TimesheetHeaderStyle>Time Spent (Days)</th>
+                    <th class=TimesheetHeaderStyle>Comments</th>
+                </tr>
+            </table>
+        </div>
+        <div>
+            <br />
+            <button onclick="ExportTimesheets()">Export timesheets</button>
+            <input id="ExportPreviousWeek" name="ExportRange" type="radio"><small>Previous week</small></input>
+            <input name="ExportRange" type="radio"><small>All</small></input>
+        </div>
+        <div>
+            <br />
+            <textarea id="Exported" rows="4" style="width:100%"></textarea>
+        </div>
+    </fieldset>
+</body>
+</html>
