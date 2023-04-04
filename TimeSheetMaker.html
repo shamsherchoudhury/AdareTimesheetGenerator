@@ -533,6 +533,8 @@
 
     function AddTableEntryToStorage(tableEntry)
     {
+        var entriesCount;
+
         var timeSheetKey = GetTimeSheetKey();
 
         var timeSheetJSON = localStorage.getItem(timeSheetKey);
@@ -564,6 +566,8 @@
             }
 
             localStorage.setItem(timeSheetKey, JSON.stringify(userTimeSheets));
+
+            entriesCount = 1;
         }
         else
         {
@@ -629,6 +633,8 @@
                         else
                         {
                             timeSheet.Content[z].TableEntries.push(tableEntry);
+
+                            entriesCount = timeSheet.Content[z].TableEntries.length;
                         }
                     }
                     break;
@@ -645,20 +651,40 @@
                     TableEntries:timeSheetEntries
                 }
 
-                timeSheet.Content.push(userTimeSheetTable)
+                timeSheet.Content.push(userTimeSheetTable);
+
+                entriesCount = 1;
             }
 
             localStorage.setItem(timeSheetKey, JSON.stringify(timeSheet));
         }
+
+        return entriesCount;
     }
 
     function SubmitToTimesheetHandler(tableEntry)
     {
-        AddTableEntryToStorage(tableEntry);
+        var isToday = IsCalendarDateToday();
 
-        PopulateTimeSheetTable();
+        if (!isToday)
+        {
+            if (!confirm("This entry will be added for the next day"))
+            {
+                return;
+            }
+        }
 
-        ResetSubmissionValues();
+        var entriesCount = AddTableEntryToStorage(tableEntry);
+
+        if ((!isToday) && (entriesCount == 1))
+        {
+            InitializePage();
+        }
+        else
+        {
+            PopulateTimeSheetTable();
+            ResetSubmissionValues();
+        }
 
         //document.getElementById("User").disabled = true;
         document.getElementById("SubmitToTimesheet").disabled = true;
@@ -1351,23 +1377,18 @@
         document.getElementById("SetupAddJob").disabled = (!((jobNumber != "") && (jobName != "") && (selectedIndex != 0)));
     }
 
-    function UpdateCalendarDependencies()
+    function IsCalendarDateToday()
     {
         var selectedDate = document.getElementById("SubmitTimesheetEntryDate").value;
-
         var nowDate = new Date().toISOString();
-
         nowDate = nowDate.substr(0, nowDate.indexOf("T"));
+        return (selectedDate == nowDate);
+    }
 
-        var isToday = (selectedDate == nowDate);
-
-        //document.getElementById("HoursLabel").hidden = isToday;
-        //document.getElementById("SubmitTimeSpent").hidden = isToday;
-        document.getElementById("SubmitToTimesheet").hidden = !isToday;
-
-        document.getElementById("TimeSheetControls").hidden = !isToday;
-
-        //PopulateTimeSheetTable();
+    function UpdateCalendarDependencies()
+    {
+        var isToday = IsCalendarDateToday();
+        document.getElementById("SubmitToTimesheet").hidden = document.getElementById("TimeSheetControls").hidden = !isToday;
     }
 
     function SetTimeSheetState()
@@ -1437,6 +1458,8 @@
 
         var applyDateRange = (document.getElementById("ExportPreviousWeek").checked == true);
 
+        var confirmAcceptingIncompleteEntries = true;
+
         if (timeSheetJSON != null)
         {
             var timeSheets = JSON.parse(timeSheetJSON);
@@ -1446,38 +1469,56 @@
             var dateRange = GetPreviousWeekDateRange();
 
             for (var k = 0; k < timeSheets.Content.length; k++)
+            {
+                var timeSheetTable = timeSheets.Content[k];
+
+                var dateParts = timeSheetTable.TableDateTime.split("-");
+
+                var timeSheetDate = dateParts[2] + "/" + dateParts[1] + "/" + dateParts[0];
+
+                var testDate = new Date(Number(dateParts[0]), Number(dateParts[1]) - 1, Number(dateParts[2]), 0, 0, 0, 0);
+
+                if (applyDateRange && ((testDate < dateRange[0]) || (testDate > dateRange[1])))
                 {
-                    var timeSheetTable = timeSheets.Content[k];
+                    continue;
+                }
 
-                    var dateParts = timeSheetTable.TableDateTime.split("-");
+                for (var t = 0; t < timeSheetTable.TableEntries.length; t++)
+                {
+                    var totalTimeSpentFinal = 0;
+                    var totalComments = [];
 
-                    var timeSheetDate = dateParts[2] + "/" + dateParts[1] + "/" + dateParts[0];
+                    if (ExportTableEntry(timeSheetTable.TableEntries[t]))
+		            {
+                        var totalTimeSpent = 0;
 
-                    var testDate = new Date(Number(dateParts[0]), Number(dateParts[1]) - 1, Number(dateParts[2]), 0, 0, 0, 0);
-
-
-                    if (applyDateRange && ((testDate < dateRange[0]) || (testDate > dateRange[1])))
-                    {
-                        continue;
-                    }
-
-                    for (var t = 0; t < timeSheetTable.TableEntries.length; t++)
-                    {
-                        if (ExportTableEntry(timeSheetTable.TableEntries[t]))
-    		            {
-        		    	    var totalTimeSpent = ExtractTimeSpentPart(timeSheetTable.TableEntries[t], "H");
+                        if (!timeSheetTable.TableEntries[t].EntryComplete && confirmAcceptingIncompleteEntries)
+                        {
+                            if (confirm('Incomplete entries found (time spent will be exported as "INCOMPLETE") continue?'))
+                            {
+                                confirmAcceptingIncompleteEntries = false;
+                            }
+                            else
+                            {
+                                return;
+                            }
+                        }
+                        else
+                        {
+                            totalTimeSpent = ExtractTimeSpentPart(timeSheetTable.TableEntries[t], "H");
 
                             totalTimeSpent *= 60;
 
                             totalTimeSpent += ExtractTimeSpentPart(timeSheetTable.TableEntries[t], "M");
+                        }
 
-        	                var totalComments = [];
+                        if (timeSheetTable.TableEntries[t].TableComment != "")
+                        {
+                            totalComments.push(timeSheetTable.TableEntries[t].TableComment);
+                        }
 
-                            if (timeSheetTable.TableEntries[t].TableComment != "")
-                            {
-                                totalComments.push(timeSheetTable.TableEntries[t].TableComment);
-                            }
-
+                        if (timeSheetTable.TableEntries[t].EntryComplete)
+                        {
                             var keyToMatch = BuildKey(timeSheetTable.TableEntries[t]);
 
                             for (var i = t + 1; i < timeSheetTable.TableEntries.length; i++)
@@ -1524,62 +1565,62 @@
                 			    }
         	                }
 
-        			var totalTimeSpentHours = totalTimeSpent  / 60;
-        			var totalTimeSpentHoursFloor = Math.floor(totalTimeSpentHours);
-        			var totalTimeSpentExtra = totalTimeSpentHours - totalTimeSpentHoursFloor;
-        			var totalTimeSpentFinal = 0;
+                            var totalTimeSpentHours = totalTimeSpent  / 60;
+                			var totalTimeSpentHoursFloor = Math.floor(totalTimeSpentHours);
+                			var totalTimeSpentExtra = totalTimeSpentHours - totalTimeSpentHoursFloor;
 
-        			if (totalTimeSpentExtra < 0.25)
-        			{
-        				totalTimeSpentFinal  = 	totalTimeSpentHoursFloor;
-        			}
-        			else if (totalTimeSpentExtra < 0.5)
-        			{
-        		    		totalTimeSpentFinal  = 	totalTimeSpentHoursFloor + 0.25;
-        			}
-               			else if (totalTimeSpentExtra < 0.75)
-        			{
-        				totalTimeSpentFinal  = 	totalTimeSpentHoursFloor + 0.5;
-        			}
-        			else //if (totalTimeSpentExtra < 1)
-        			{
-        				totalTimeSpentFinal  = 	totalTimeSpentHoursFloor + 0.75;
-        			}/*
-        			else
-        			{
-        				totalTimeSpentFinal   += 1;
-        			}*/
+                			if (totalTimeSpentExtra < 0.25)
+                			{
+                				totalTimeSpentFinal  = 	totalTimeSpentHoursFloor;
+                			}
+                			else if (totalTimeSpentExtra < 0.5)
+                			{
+                		    		totalTimeSpentFinal  = 	totalTimeSpentHoursFloor + 0.25;
+                			}
+                       			else if (totalTimeSpentExtra < 0.75)
+                			{
+                				totalTimeSpentFinal  = 	totalTimeSpentHoursFloor + 0.5;
+                			}
+                			else //if (totalTimeSpentExtra < 1)
+                			{
+                				totalTimeSpentFinal  = 	totalTimeSpentHoursFloor + 0.75;
+                			}/*
+                			else
+                			{
+                				totalTimeSpentFinal   += 1;
+                			}*/
 
-                    if (totalTimeSpentFinal == 0)
-                    {
-                        continue;
+                            if (totalTimeSpentFinal == 0)
+                            {
+                                continue;
+                            }
+                        }
+                        else
+                        {
+                            totalTimeSpentFinal = "INCOMPLETE";
+                        }
+
+                        finalOutput.push(timeSheetDate + "," + timeSheetTable.TableEntries[t].TableCategory + ",,\"" +
+                            timeSheetTable.TableEntries[t].TableJobNumber.replace(/"/g, "\"\"") +  "\",\"" + timeSheetTable.TableEntries[t].TableJobName.replace(/"/g, "\"\"") +
+                            "\",\"" + timeSheetTable.TableEntries[t].TableCustomerName.replace(/"/g, "\"\"") + "\"," + totalTimeSpentFinal.toString() + ",,\"" +
+                            totalComments.toString().replace(/"/g, "\"\"") + "\"");
+
+            			var blah = 0;
                     }
-
-//                    finalOutput.push(timeSheetDate + "," + timeSheetTable.TableEntries[t].TableCategory + ",,\"" +
-//        				timeSheetTable.TableEntries[t].TableJobNumber +  "\",\"" + timeSheetTable.TableEntries[t].TableJobName +
-//        				"\",\"" + timeSheetTable.TableEntries[t].TableCustomerName + "\"," + totalTimeSpentFinal.toString() + ",,\"" + totalComments.toString() + "\"");
-
-                    finalOutput.push(timeSheetDate + "," + timeSheetTable.TableEntries[t].TableCategory + ",,\"" +
-                        timeSheetTable.TableEntries[t].TableJobNumber.replace(/"/g, "\"\"") +  "\",\"" + timeSheetTable.TableEntries[t].TableJobName.replace(/"/g, "\"\"") +
-                        "\",\"" + timeSheetTable.TableEntries[t].TableCustomerName.replace(/"/g, "\"\"") + "\"," + totalTimeSpentFinal.toString() + ",,\"" +
-                        totalComments.toString().replace(/"/g, "\"\"") + "\"");
-
-        			var blah = 0;
-        		    }
                 }
             }
-
-            var user = document.getElementById("UserList").value;
-
-            var content = "Name,Date,Category,Chargeable,Job/Project Number,Job Name,Customer name,Time Spent (Hrs),Time Spent (Days),Comments\n";
-
-    	    for (var z = 0; z < finalOutput.length; z++)
-    	    {
-    		    content += user + "," + finalOutput[z] + "\n";
-    	    }
-
-    	    document.getElementById("Exported").innerHTML = content;
         }
+
+        var user = document.getElementById("UserList").value;
+
+        var content = "Name,Date,Category,Chargeable,Job/Project Number,Job Name,Customer name,Time Spent (Hrs),Time Spent (Days),Comments\n";
+
+	    for (var z = 0; z < finalOutput.length; z++)
+	    {
+		    content += user + "," + finalOutput[z] + "\n";
+	    }
+
+	    document.getElementById("Exported").innerHTML = content;
     }
 
     function FindItem(item)
@@ -1601,8 +1642,9 @@
         if (!tableEntry.IncludeInExport)
             return false;
 
+        /*
         if (!tableEntry.EntryComplete)
-            return false;
+            return false;*/
 
         return true;
     }
@@ -1610,8 +1652,12 @@
     </script>
 </head>
 <body onload="InitializePage()" >
-    <h1>Timesheet Maker v1.0.3</h1>
-
+    <h1>Timesheet Maker v1.0.4</h1>
+    <small>@2018 Finalizer Software Solutions.</small>
+    <small>Based on Excel timesheet tempate from 23rd November 2017.</small>
+    <br />
+    <br />
+    <br />
     <div>
         <label style="padding-right: 13px">Job/Project Number</label>
         <input id="SetupJobNumber" style="width: 118px" type="text" oninput="UpdateAddJobState()"/>
